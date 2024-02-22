@@ -19,7 +19,7 @@ To run our code, please install all the dependency packages by using the followi
 ```
 pip install -r requirements.txt
 ```
-Note that to use `tensorflow-gpu==1.13.1`, you need to install and use `CUDA 10.0`.
+Note that to use `tensorflow-gpu==1.13.1`, you need to install and use `CUDA 10.0` and `cuDNN 7.4`.
 
 ## Quick Start
 After the environment setup, you can simply type the following command:
