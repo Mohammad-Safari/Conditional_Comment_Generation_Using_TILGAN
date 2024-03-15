@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import math
+import subprocess
 import sys
 import time
 import numpy as np
@@ -124,7 +125,7 @@ def create_models(hparams, model, length=22):
 
 def read_data(src_path):
     data_set = []
-    max_length1 = 0
+    max_length = 0
 
     with tf.gfile.GFile(src_path, mode="r") as src_file:
         for counter, src in enumerate(src_file):
@@ -132,20 +133,20 @@ def read_data(src_path):
                 log.info(f"Reading data line {counter}")
                 sys.stdout.flush()
 
-            sentences, s = [], []
-            for x in src.split(" "):
+            sentences, sentence = [],[]
+            for x in src.split():
                 id = int(x)
                 if id != -1:
-                    s.append(id)
+                    sentence.append(id)
                 else:
-                    max_length1 = max(max_length1, len(s))
-                    sentences.append(s)
-                    s = []
+                    max_length = max(max_length, len(sentence))
+                    sentences.append(sentence)
+                    sentence = []
 
             data_set.append(sentences)
 
     log.info(f"Total lines read: {counter + 1}")
-    log.info(f"Maximum sentence length: {max_length1}")
+    log.info(f"Maximum sentence length: {max_length}")
     return data_set
 
 
@@ -158,42 +159,30 @@ def safe_exp(value):
   return ans
 
 def train(hparams):
+    # Initialize embeddings
     embeddings = init_embedding(hparams)
     hparams.add_hparam(name="embeddings", value=embeddings)
     log.info("Vocab loaded")
 
+    # Create models
     train_model, eval_model, infer_model = create_models(hparams, TILGAN)
     config = get_config_proto(log_device_placement=False)
-    train_sess, eval_sess, infer_sess = (tf.Session(config=config, graph=model.graph) 
-                                            for model in (train_model, eval_model, infer_model))
+    train_sess, eval_sess, infer_sess = [tf.Session(config=config, graph=model.graph) for model in (train_model, eval_model, infer_model)]
     log.info("Model created")
 
-    # todo harcoded data/ path
-    train_data, valid_data, test_data = (read_data(data_path) 
-                                            for data_path in ("data/train.ids", "data/valid.ids", "data/test.ids"))
-
-    ckpt = tf.train.get_checkpoint_state(hparams.train_dir)
-    ckpt_path = os.path.join(hparams.train_dir, "ckpt")
-    with train_model.graph.as_default():
-        if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
-            log.info(f"Reading model parameters from {ckpt.model_checkpoint_path}")
-            train_model.model.saver.restore(train_sess, ckpt.model_checkpoint_path)
-            eval_model.model.saver.restore(eval_sess, ckpt.model_checkpoint_path)
-            infer_model.model.saver.restore(infer_sess, ckpt.model_checkpoint_path)
-            global_step = train_model.model.global_step.eval(session=train_sess)
-        else:
-            train_sess.run(tf.global_variables_initializer())
-            global_step = 0
+    # Load data
+    data_paths = ("data/train.ids", "data/valid.ids", "data/test.ids")
+    train_data, valid_data, test_data = (read_data(data_path) for data_path in data_paths)
+    global_step = load_checkpoint(train_model, eval_model, infer_model, train_sess, eval_sess, infer_sess, hparams.train_dir)
     to_vocab, rev_to_vocab = data_utils.initialize_vocabulary(hparams.from_vocab)
-
-
-
     step_loss, step_time, total_predict_count, total_loss, total_time, avg_loss, avg_time = [0.0] * 7
     total_loss_disc, total_loss_gen, total_loss_gan_ae,avg_disc_loss, avg_gen_loss ,avg_gan_ae_loss= [0.0] * 6
 
+
+    # Training loop
     while global_step <= 680000:
         start_time = time.time()
-        step_loss, global_step, predict_count,loss_disc,loss_gen, loss_gan_ae = train_model.model.train_step(train_sess, train_data)
+        step_loss, global_step, predict_count, loss_disc, loss_gen, loss_gan_ae = train_model.model.train_step(train_sess, train_data)
 
         total_loss += step_loss / hparams.batch_size
         total_loss_disc += loss_disc
@@ -201,122 +190,170 @@ def train(hparams):
         total_loss_gan_ae += loss_gan_ae
         total_time += (time.time() - start_time)
         total_predict_count += predict_count
+
         if global_step % 100 == 0:
-            ppl = safe_exp(total_loss * hparams.batch_size / total_predict_count)
-            avg_loss = total_loss / 100
-            avg_time = total_time / 100
-            avg_disc_loss = total_loss_disc / 100
-            avg_gen_loss = total_loss_gen / 100
-            avg_gan_ae_loss = total_loss_gan_ae / 100
-            total_loss, total_predict_count, total_time, total_loss_disc, total_loss_gen,total_loss_gan_ae = 0.0, 0.0, 0.0,0.0,0.0,0.0
-            print("global step %d   step-time %.2fs  loss %.3f ppl %.2f  disc %.3f gen %.3f gan_ae %.3f" % (global_step, avg_time, avg_loss, ppl, avg_disc_loss,avg_gen_loss,avg_gan_ae_loss))
+            avg_loss, avg_time, avg_disc_loss, avg_gen_loss, avg_gan_ae_loss = calculate_averages(total_loss, total_time, total_loss_disc, total_loss_gen, total_loss_gan_ae)
+            print_metrics(global_step, avg_time, avg_loss, total_predict_count, hparams.batch_size, avg_disc_loss, avg_gen_loss, avg_gan_ae_loss)
+            reset_counters()
 
-        if  global_step % 3000 == 0:
-            train_model.model.saver.save(train_sess, ckpt_path, global_step=global_step)
-            ckpt = tf.train.get_checkpoint_state(hparams.train_dir)
+        if global_step % 3000 == 0:
+            save_checkpoint(train_model, train_sess, eval_model, eval_sess,infer_model, infer_sess, global_step, hparams.train_dir)
+            eval_model_from_checkpoint(eval_model, eval_sess, infer_model, infer_sess, global_step, valid_data, rev_to_vocab, hparams)
+
+def load_checkpoint(train_model, eval_model, infer_model, train_sess, eval_sess, infer_sess, train_dir):
+        ckpt = tf.train.get_checkpoint_state(train_dir)
+        ckpt_path = os.path.join(train_dir, "ckpt")
+        with train_model.graph.as_default():
             if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
-                eval_model.model.saver.restore(eval_sess, ckpt.model_checkpoint_path)
-                infer_model.model.saver.restore(infer_sess, ckpt.model_checkpoint_path)
-                print("load eval model.")
+                log.info(f"Reading model parameters from {ckpt.model_checkpoint_path}")
+                for sess, model in zip((train_sess, eval_sess, infer_sess), (train_model, eval_model, infer_model)):
+                    model.model.saver.restore(sess, ckpt.model_checkpoint_path)
+                global_step = train_model.model.global_step.eval(session=train_sess)
             else:
-                raise ValueError("ckpt file not found.")
-            for id in range(0, int(len(valid_data)/hparams.batch_size)):
-                step_loss, predict_count = eval_model.model.eval_step(eval_sess, valid_data, no_random=True, id=id * hparams.batch_size)
-                total_loss += step_loss
-                total_predict_count += predict_count
-            ppl = safe_exp(total_loss / total_predict_count)
+                train_sess.run(tf.global_variables_initializer())
+                global_step = 0
+        return global_step
 
-            total_loss, total_predict_count, total_time = 0.0, 0.0, 0.0
-            print("eval ppl %.2f" % (ppl))
+def calculate_averages(total_loss, total_time, total_loss_disc, total_loss_gen, total_loss_gan_ae):
+    avg_loss = total_loss / 100
+    avg_time = total_time / 100
+    avg_disc_loss = total_loss_disc / 100
+    avg_gen_loss = total_loss_gen / 100
+    avg_gan_ae_loss = total_loss_gan_ae / 100
+    return avg_loss, avg_time, avg_disc_loss, avg_gen_loss, avg_gan_ae_loss
 
-            if global_step < 12000:
-                continue
-            x = hparams.train_dir.split("/")[-2]
-            f1 = open("output/" + x + "/ref2_file" + str(global_step),"w",encoding="utf-8")
-            f2 = open("output/" + x + "/predict2_file" + str(global_step),"w", encoding="utf-8")
-            for id in range(0, int(len(valid_data) / hparams.batch_size)):
+def print_metrics(global_step, avg_time, avg_loss, total_predict_count, batch_size, avg_disc_loss, avg_gen_loss, avg_gan_ae_loss):
+    ppl = safe_exp(avg_loss * batch_size / total_predict_count)
+    log.info(f"global step {global_step}   step-time {avg_time:.2f}s  loss {avg_loss:.3f} ppl {ppl:.2f}  disc {avg_disc_loss:.3f} gen {avg_gen_loss:.3f} gan_ae {avg_gan_ae_loss:.3f}")
 
-                given, answer, predict = infer_model.model.infer_step(infer_sess, valid_data, no_random=True,
-                                                                      id=id * hparams.batch_size)
-                for i in range(hparams.batch_size):
-                    sample_output = predict[i]
-                    if hparams.EOS_ID in sample_output:
-                        sample_output = sample_output[:sample_output.index(hparams.EOS_ID)]
-                    pred = []
-                    for output in sample_output:
-                        pred.append(tf.compat.as_str(rev_to_vocab[output]))
+def reset_counters():
+    total_loss, total_predict_count, total_time, total_loss_disc, total_loss_gen, total_loss_gan_ae = [0.0] * 6
 
-                    sample_output = answer[i]
-                    if hparams.EOS_ID in sample_output[:]:
-                        if sample_output[0] == hparams.GO_ID:
-                            sample_output = sample_output[1:sample_output.index(hparams.EOS_ID)]
-                        else:
-                            sample_output = sample_output[0:sample_output.index(hparams.EOS_ID)]
-                    ans = []
-                    for output in sample_output:
-                        ans.append(tf.compat.as_str(rev_to_vocab[output]))
-                    if id == 0 and i < 8:
-                        print("answer: ", " ".join(ans))
-                        print("predict: ", " ".join(pred))
+def save_checkpoint(train_model, train_sess,eval_model, eval_sess,infer_model, infer_sess, global_step, train_dir):
+    train_model.model.saver.save(train_sess, ckpt_path, global_step=global_step)
+    ckpt = tf.train.get_checkpoint_state(train_dir)
+    ckpt_path = os.path.join(train_dir, "ckpt")
+    if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+        eval_model.model.saver.restore(eval_sess, ckpt.model_checkpoint_path)
+        infer_model.model.saver.restore(infer_sess, ckpt.model_checkpoint_path)
+        log.info("eval model loaded")
+    else:
+        raise ValueError("ckpt file not found")
 
-                    f1.write(" ".join(ans).replace("_UNK", "_unknown") + "\n")
-                    f2.write(" ".join(pred) + "\n")
+def eval_model_from_checkpoint(eval_model, eval_sess, infer_model, infer_sess, global_step, valid_data, rev_to_vocab, hparams):
+    total_loss, total_predict_count = 0.0, 0.0
 
-            f1.close()
-            f2.close()
-            hyp_file = "output/" + x + "/predict2_file" + str(global_step)
-            ref_file = "output/" + x + "/ref2_file" + str(global_step)
-            try:
-                result = os.popen("python multi_bleu.py -ref " + ref_file + " -hyp " + hyp_file)
-                BLEU_result = result.read()
-                print("BLEU_result: ", BLEU_result)
-                pattern = re.compile('BLEU = (.*?), (.*?)/(.*?)/(.*?)/(.*?) .*?BP=(.*?),.*?ratio=(.*?),.*?=(.*?),.*?=(.*?)\\)')
-                m = pattern.match(BLEU_result)
-                global_bleu = m.group(1)
-                bleu1 = m.group(2)
-                bleu2 = m.group(3)
-                bleu3 = m.group(4)
-                bleu4 = m.group(5)
-                BP = m.group(6)
-                ratio = m.group(7)
-                hyp_len = m.group(8)
-                ref_len = m.group(9)
-                print({"global_bleu": float(global_bleu), "bleu1": float(bleu1), "bleu2": float(bleu2), "bleu3": float(bleu3), "bleu4": float(bleu4), "BP": float(BP), "ratio": float(ratio), "hyp_len": float(hyp_len), "ref_len": float(ref_len)}, step=global_step)
-            except:
-                print("error when evaluation BLEU, skip ... ")
+    for id in range(0, int(len(valid_data) / hparams.batch_size)):
+        step_loss, predict_count = eval_model.model.eval_step(eval_sess, valid_data, no_random=True, id=id * hparams.batch_size)
+        total_loss += step_loss
+        total_predict_count += predict_count
 
-            f3 = open("output/" + x + "/predict2_file" + str(global_step), "r", encoding="utf-8")
-            dic1 = {}
-            dic2 = {}
+    ppl = safe_exp(total_loss / total_predict_count)
+    log.info(f"eval ppl is {ppl:.2f}")
+
+    if global_step < 12000:
+        return
+
+    x = hparams.train_dir.split("/")[-2]
+    ref_file_path = f"output/{x}/ref2_file{str(global_step)}"
+    pred_file_path = f"output/{x}/predict2_file{str(global_step)}"
+
+    with open(ref_file_path, "w", encoding="utf-8") as ref_file, \
+         open(pred_file_path, "w", encoding="utf-8") as pred_file:
+        
+        for id in range(0, int(len(valid_data) / hparams.batch_size)):
+            given, answer, predict = infer_model.model.infer_step(infer_sess, valid_data, no_random=True, id=id * hparams.batch_size)
+            write_outputs_to_files(hparams, rev_to_vocab, ref_file, pred_file, id, predict, answer)
+    
+    evaluate_bleu(x, global_step)
+    calculate_distinct_ngrams(x, global_step)
+
+
+def write_outputs_to_files(hparams, rev_to_vocab, f1, f2, id, predict, answer):
+    for i in range(hparams.batch_size):
+        sample_output = predict[i][:predict[i].index(hparams.EOS_ID)] if hparams.EOS_ID in predict[i] else predict[i]
+        pred = [rev_to_vocab.get(output, "_unknown") for output in sample_output]
+
+        sample_output = answer[i][:answer[i].index(hparams.EOS_ID)] if hparams.EOS_ID in answer[i] else answer[i]
+        sample_output = sample_output[1:] if sample_output[0] == hparams.GO_ID else sample_output
+        ans = [rev_to_vocab.get(output, "_unknown") for output in sample_output]
+
+        if id == 0 and i < 8:
+            log.info("answer: ", " ".join(ans))
+            log.info("predict: ", " ".join(pred))
+
+        f1.write(" ".join(ans).replace("_UNK", "_unknown") + "\n")
+        f2.write(" ".join(pred) + "\n")
+
+def evaluate_bleu(x, global_step):
+    hyp_file = f"output/{x}/predict2_file{global_step}"
+    ref_file = f"output/{x}/ref2_file{global_step}"
+    
+    try:
+        result = subprocess.run(["python", "multi_bleu.py", "-ref", ref_file, "-hyp", hyp_file], capture_output=True, text=True)
+        BLEU_result = result.stdout.strip()
+        log.info(f"BLEU_result: {BLEU_result}")
+
+        pattern = re.compile(r'BLEU = (.*?), (.*?)/(.*?)/(.*?)/(.*?) .*?BP=(.*?),.*?ratio=(.*?),.*?=(.*?),.*?=(.*?)\\)')
+        m = pattern.match(BLEU_result)
+        
+        if m:
+            global_bleu, bleu1, bleu2, bleu3, bleu4, BP, ratio, hyp_len, ref_len = map(float, m.groups())
+            log.info({
+                "global_bleu": global_bleu,
+                "bleu1": bleu1,
+                "bleu2": bleu2,
+                "bleu3": bleu3,
+                "bleu4": bleu4,
+                "BP": BP,
+                "ratio": ratio,
+                "hyp_len": hyp_len,
+                "ref_len": ref_len
+            }, step=global_step)
+    
+    except Exception as e:
+        log.warning("Error when evaluating BLEU, skipping ... ")
+
+def calculate_distinct_ngrams(x, global_step):
+    ngram_file_path = f"output/{x}/predict2_file{global_step}"
+    try:
+        with open(ngram_file_path, "r", encoding="utf-8") as f:
+            dic1, dic2 = {}, {}
             distinc1, distinc2 = 0, 0
             all1, all2 = 0, 0
-            t = 0
-            for l in f3:
-                line = l.rstrip("\n").split(" ")
-                for word in line:
-                    all1 += 1
+            
+            for line in f:
+                words = line.rstrip("\n").split(" ")
+                all1 += len(words)
+                
+                for word in words:
                     if word not in dic1:
                         dic1[word] = 1
                         distinc1 += 1
-                for i in range(0, len(line) - 1):
+                
+                for i in range(len(words) - 1):
                     all2 += 1
-                    if line[i] + " " + line[i + 1] not in dic2:
-                        dic2[line[i] + " " + line[i + 1]] = 1
+                    ngram = words[i] + " " + words[i + 1]
+                    if ngram not in dic2:
+                        dic2[ngram] = 1
                         distinc2 += 1
-            print("distinc1: %.5f" % float(distinc1 / all1))
-            print("distinc2: %.5f" % float(distinc2 / all2))
-
-            print("infer done.")
+        
+        log.info(f"distinc1: {distinc1 / all1:.5f}")
+        log.info(f"distinc2: {distinc2 / all2:.5f}")
+        log.info("infer done")
+    
+    except Exception as e:
+        log.warning("Error while calculating distinct n-grams, skipping ... ")
 
 def init_embedding(hparams):
-    # todo harcoded data/ path
-    with open("data/vocab_20000", "r", encoding="utf-8") as vocab_file:
+    vocab_path = "data/vocab_20000"
+    word_vectors_path = "data/roc_vector.txt"
+
+    with open(vocab_path, "r", encoding="utf-8") as vocab_file:
         vocab = [line.rstrip("\n") for line in vocab_file]
 
-    # todo harcoded data/ path
-    word_vectors = KeyedVectors.load_word2vec_format("data/roc_vector.txt")
-    emb = []
-    num = 0
+    word_vectors = KeyedVectors.load_word2vec_format(word_vectors_path)
+    num, emb = 0, []
 
     for word in vocab:
         if word in word_vectors:
@@ -328,8 +365,8 @@ def init_embedding(hparams):
     log.info("Init embedding finished")
     log.info(f"Total words with pre-trained embeddings: {num}")
     log.info(f"Embedding shape: {np.array(emb).shape}")
-    return np.array(emb)
 
+    return np.array(emb)
 def main(_):
     hparams = create_hparams(FLAGS)
     train(hparams)
@@ -340,6 +377,6 @@ if __name__ == "__main__":
     FLAGS, remaining = my_parser.parse_known_args()
     FLAGS.train_dir = FLAGS.model_dir + FLAGS.train_dir
     FLAGS.output_dir = FLAGS.out_dir + FLAGS.output_dir
-    print(FLAGS)
+    log.info(FLAGS)
     os.environ["CUDA_VISIBLE_DEVICES"] = FLAGS.gpu_device
     tf.app.run()
