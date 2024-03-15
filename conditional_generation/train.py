@@ -18,6 +18,13 @@ import collections
 from gensim.models import KeyedVectors
 FLAGS = None
 
+import logging as log
+log.basicConfig(
+    format='%(asctime)s %(levelname)-8s %(message)s',
+    level=log.INFO,
+    datefmt='%Y-%m-%dT%H:%M:%S'
+)
+
 # tf.enable_eager_execution()
 def add_arguments(parser):
     parser.register("type", "bool", lambda v: v.lower() == "true")
@@ -26,16 +33,11 @@ def add_arguments(parser):
     parser.add_argument("--out_dir", type=str, default="output/", help="Out directory")
     parser.add_argument("--train_dir", type=str, default="tilgan/", help="Training directory")
     parser.add_argument("--gpu_device", type=str, default="0", help="which gpu to use")
-    parser.add_argument("--train_data", type=str, default="training",
-                        help="Training data path")
-    parser.add_argument("--valid_data", type=str, default="dev",
-                        help="Valid data path")
-    parser.add_argument("--test_data", type=str, default="test",
-                        help="Test data path")
-    parser.add_argument("--from_vocab", type=str, default="data/vocab_20000",
-                        help="from vocab path")
-    parser.add_argument("--to_vocab", type=str, default="data/vocab_20000",
-                        help="to vocab path")
+    parser.add_argument("--train_data", type=str, default="training", help="Training data path")
+    parser.add_argument("--valid_data", type=str, default="dev", help="Valid data path")
+    parser.add_argument("--test_data", type=str, default="test", help="Test data path")
+    parser.add_argument("--from_vocab", type=str, default="data/vocab_20000", help="from vocab path")
+    parser.add_argument("--to_vocab", type=str, default="data/vocab_20000", help="to vocab path")
     parser.add_argument("--output_dir", type=str, default="tfm/")
     parser.add_argument("--max_train_data_size", type=int, default=0, help="Limit on the size of training data (0: no limit)")
     parser.add_argument("--from_vocab_size", type=int, default=20000, help="source vocabulary size")
@@ -45,7 +47,7 @@ def add_arguments(parser):
     parser.add_argument("--num_heads", type=int, default=8, help="Number of heads in attention")
     parser.add_argument("--emb_dim", type=int, default=300, help="Dimension of word embedding")
     parser.add_argument("--latent_dim", type=int, default=64, help="Dimension of latent variable")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size to use during training")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size to use during training")
     parser.add_argument("--max_gradient_norm", type=float, default=3.0, help="Clip gradients to this norm")
     parser.add_argument("--learning_rate_decay_factor", type=float, default=0.5, help="Learning rate decays by this much")
     parser.add_argument("--learning_rate", type=float, default=1, help="Learning rate")
@@ -95,66 +97,55 @@ def get_config_proto(log_device_placement=False, allow_soft_placement=True):
   config_proto.gpu_options.allow_growth = True
   return config_proto
 
+BaseModel = collections.namedtuple("BaseModel", ("graph", "model"))
 
-class TrainModel(
-    collections.namedtuple("TrainModel",
-                           ("graph", "model"))):
+class TrainModel(BaseModel):
   pass
 
-class EvalModel(
-    collections.namedtuple("EvalModel",
-                           ("graph", "model"))):
+class EvalModel(BaseModel):
   pass
 
-class InferModel(
-    collections.namedtuple("InferModel",
-                           ("graph", "model"))):
+class InferModel(BaseModel):
   pass
 
-def create_model(hparams, model, length=22):
-    train_graph = tf.Graph()
-    with train_graph.as_default():
-        train_model = model(hparams, tf.contrib.learn.ModeKeys.TRAIN)
+def create_models(hparams, model, length=22):
+    def craete_model_with_mode(mode):
+        graph = tf.Graph()
+        with graph.as_default():
+            return graph, model(hparams, mode)
 
-    eval_graph = tf.Graph()
-    with eval_graph.as_default():
-        eval_model = model(hparams, tf.contrib.learn.ModeKeys.EVAL)
+    train_graph, train_model = craete_model_with_mode(tf.contrib.learn.ModeKeys.TRAIN)
+    eval_graph, eval_model = craete_model_with_mode(tf.contrib.learn.ModeKeys.EVAL)
+    infer_graph, infer_model = craete_model_with_mode(tf.contrib.learn.ModeKeys.INFER)
 
-    infer_graph = tf.Graph()
-    with infer_graph.as_default():
-        infer_model = model(hparams, tf.contrib.learn.ModeKeys.INFER)
-
-    return TrainModel(graph=train_graph, model=train_model), EvalModel(graph=eval_graph, model=eval_model), InferModel(
-        graph=infer_graph, model=infer_model)
+    return (TrainModel(graph=train_graph, model=train_model),
+        EvalModel(graph=eval_graph, model=eval_model), 
+        InferModel(graph=infer_graph, model=infer_model))
 
 def read_data(src_path):
     data_set = []
-    counter = 0
     max_length1 = 0
+
     with tf.gfile.GFile(src_path, mode="r") as src_file:
-        src = src_file.readline()
-        while src:
+        for counter, src in enumerate(src_file):
             if counter % 100000 == 0:
-                print("  reading data line %d" % counter)
+                log.info(f"Reading data line {counter}")
                 sys.stdout.flush()
 
-            sentences = []
-            s = []
+            sentences, s = [], []
             for x in src.split(" "):
                 id = int(x)
                 if id != -1:
                     s.append(id)
                 else:
-                    if len(s) > max_length1:
-                        max_length1 = len(s)
+                    max_length1 = max(max_length1, len(s))
                     sentences.append(s)
                     s = []
 
             data_set.append(sentences)
-            counter += 1
-            src = src_file.readline()
-    print(counter)
-    print(max_length1)
+
+    log.info(f"Total lines read: {counter + 1}")
+    log.info(f"Maximum sentence length: {max_length1}")
     return data_set
 
 
@@ -169,23 +160,23 @@ def safe_exp(value):
 def train(hparams):
     embeddings = init_embedding(hparams)
     hparams.add_hparam(name="embeddings", value=embeddings)
-    print("Vocab load over.")
-    train_model, eval_model, infer_model = create_model(hparams, TILGAN)
-    config = get_config_proto(
-        log_device_placement=False)
-    train_sess = tf.Session(config=config, graph=train_model.graph)
-    eval_sess = tf.Session(config=config, graph=eval_model.graph)
-    infer_sess = tf.Session(config=config, graph=infer_model.graph)
-    print("Model create over.")
-    train_data = read_data("data/train.ids")
-    valid_data = read_data("data/valid.ids")
-    test_data = read_data("data/test.ids")
+    log.info("Vocab loaded")
+
+    train_model, eval_model, infer_model = create_models(hparams, TILGAN)
+    config = get_config_proto(log_device_placement=False)
+    train_sess, eval_sess, infer_sess = (tf.Session(config=config, graph=model.graph) 
+                                            for model in (train_model, eval_model, infer_model))
+    log.info("Model created")
+
+    # todo harcoded data/ path
+    train_data, valid_data, test_data = (read_data(data_path) 
+                                            for data_path in ("data/train.ids", "data/valid.ids", "data/test.ids"))
 
     ckpt = tf.train.get_checkpoint_state(hparams.train_dir)
     ckpt_path = os.path.join(hparams.train_dir, "ckpt")
     with train_model.graph.as_default():
         if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
-            print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+            log.info(f"Reading model parameters from {ckpt.model_checkpoint_path}")
             train_model.model.saver.restore(train_sess, ckpt.model_checkpoint_path)
             eval_model.model.saver.restore(eval_sess, ckpt.model_checkpoint_path)
             infer_model.model.saver.restore(infer_sess, ckpt.model_checkpoint_path)
@@ -197,8 +188,8 @@ def train(hparams):
 
 
 
-    step_loss, step_time, total_predict_count, total_loss, total_time, avg_loss, avg_time = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-    total_loss_disc, total_loss_gen, total_loss_gan_ae,avg_disc_loss, avg_gen_loss ,avg_gan_ae_loss= 0.0, 0.0, 0.0, 0.0,0.0,0.0
+    step_loss, step_time, total_predict_count, total_loss, total_time, avg_loss, avg_time = [0.0] * 7
+    total_loss_disc, total_loss_gen, total_loss_gan_ae,avg_disc_loss, avg_gen_loss ,avg_gan_ae_loss= [0.0] * 6
 
     while global_step <= 680000:
         start_time = time.time()
@@ -318,28 +309,26 @@ def train(hparams):
             print("infer done.")
 
 def init_embedding(hparams):
-    f = open("data/vocab_20000", "r", encoding="utf-8")
-    vocab = []
-    for line in f:
-        vocab.append(line.rstrip("\n"))
-    # word_vectors = KeyedVectors.load_word2vec_format("GoogleNews-vectors-negative300.bin", binary=True)
+    # todo harcoded data/ path
+    with open("data/vocab_20000", "r", encoding="utf-8") as vocab_file:
+        vocab = [line.rstrip("\n") for line in vocab_file]
 
+    # todo harcoded data/ path
     word_vectors = KeyedVectors.load_word2vec_format("data/roc_vector.txt")
     emb = []
     num = 0
-    for i in range(0, len(vocab)):
-        word = vocab[i]
+
+    for word in vocab:
         if word in word_vectors:
             num += 1
             emb.append(word_vectors[word])
         else:
             emb.append((0.1 * np.random.random([hparams.emb_dim]) - 0.05).astype(np.float32))
 
-    print(" init embedding finished")
-    emb = np.array(emb)
-    print(num)
-    print(emb.shape)
-    return emb
+    log.info("Init embedding finished")
+    log.info(f"Total words with pre-trained embeddings: {num}")
+    log.info(f"Embedding shape: {np.array(emb).shape}")
+    return np.array(emb)
 
 def main(_):
     hparams = create_hparams(FLAGS)
