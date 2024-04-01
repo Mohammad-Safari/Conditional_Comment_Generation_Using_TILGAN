@@ -7,6 +7,7 @@ import sys
 import time
 import numpy as np
 import tensorflow as tf
+import hparam as hp
 import os
 import re
 
@@ -54,7 +55,7 @@ def add_arguments(parser):
 
 
 def create_hparams(flags):
-    return tf.contrib.training.HParams(
+    return hp.HParams(
         # dir path
         data_dir=flags.data_dir,
         train_dir=flags.train_dir,
@@ -89,7 +90,7 @@ def create_hparams(flags):
     )
 
 def get_config_proto(log_device_placement=False, allow_soft_placement=True):
-  config_proto = tf.ConfigProto(
+  config_proto = tf.compat.v1.ConfigProto(
       log_device_placement=log_device_placement,
       allow_soft_placement=allow_soft_placement)
   config_proto.gpu_options.allow_growth = True
@@ -114,15 +115,15 @@ class InferModel(
 def create_model(hparams, model, length=22):
     train_graph = tf.Graph()
     with train_graph.as_default():
-        train_model = model(hparams, tf.contrib.learn.ModeKeys.TRAIN)
+        train_model = model(hparams, tf.estimator.ModeKeys.TRAIN)
 
     eval_graph = tf.Graph()
     with eval_graph.as_default():
-        eval_model = model(hparams, tf.contrib.learn.ModeKeys.EVAL)
+        eval_model = model(hparams, tf.estimator.ModeKeys.EVAL)
 
     infer_graph = tf.Graph()
     with infer_graph.as_default():
-        infer_model = model(hparams, tf.contrib.learn.ModeKeys.INFER)
+        infer_model = model(hparams, tf.estimator.ModeKeys.PREDICT)
 
     return TrainModel(graph=train_graph, model=train_model), EvalModel(graph=eval_graph, model=eval_model), InferModel(
         graph=infer_graph, model=infer_model)
@@ -131,7 +132,7 @@ def read_data(src_path):
     data_set = []
     counter = 0
     max_length1 = 0
-    with tf.gfile.GFile(src_path, mode="r") as src_file:
+    with tf.io.gfile.GFile(src_path, mode="r") as src_file:
         src = src_file.readline()
         while src:
             if counter % 100000 == 0:
@@ -173,9 +174,9 @@ def train(hparams):
     train_model, eval_model, infer_model = create_model(hparams, TILGAN)
     config = get_config_proto(
         log_device_placement=False)
-    train_sess = tf.Session(config=config, graph=train_model.graph)
-    eval_sess = tf.Session(config=config, graph=eval_model.graph)
-    infer_sess = tf.Session(config=config, graph=infer_model.graph)
+    train_sess = tf.compat.v1.Session(config=config, graph=train_model.graph)
+    eval_sess = tf.compat.v1.Session(config=config, graph=eval_model.graph)
+    infer_sess = tf.compat.v1.Session(config=config, graph=infer_model.graph)
     print("Model create over.")
     train_data = read_data("data/train.ids")
     valid_data = read_data("data/valid.ids")
@@ -184,14 +185,14 @@ def train(hparams):
     ckpt = tf.train.get_checkpoint_state(hparams.train_dir)
     ckpt_path = os.path.join(hparams.train_dir, "ckpt")
     with train_model.graph.as_default():
-        if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+        if ckpt and tf.compat.v1.train.checkpoint_exists(ckpt.model_checkpoint_path):
             print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
             train_model.model.saver.restore(train_sess, ckpt.model_checkpoint_path)
             eval_model.model.saver.restore(eval_sess, ckpt.model_checkpoint_path)
             infer_model.model.saver.restore(infer_sess, ckpt.model_checkpoint_path)
             global_step = train_model.model.global_step.eval(session=train_sess)
         else:
-            train_sess.run(tf.global_variables_initializer())
+            train_sess.run(tf.compat.v1.global_variables_initializer())
             global_step = 0
     to_vocab, rev_to_vocab = data_utils.initialize_vocabulary(hparams.from_vocab)
 
@@ -223,7 +224,7 @@ def train(hparams):
         if  global_step % 3000 == 0:
             train_model.model.saver.save(train_sess, ckpt_path, global_step=global_step)
             ckpt = tf.train.get_checkpoint_state(hparams.train_dir)
-            if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+            if ckpt and tf.compat.v1.train.checkpoint_exists(ckpt.model_checkpoint_path):
                 eval_model.model.saver.restore(eval_sess, ckpt.model_checkpoint_path)
                 infer_model.model.saver.restore(infer_sess, ckpt.model_checkpoint_path)
                 print("load eval model.")
@@ -353,4 +354,4 @@ if __name__ == "__main__":
     FLAGS.output_dir = FLAGS.out_dir + FLAGS.output_dir
     print(FLAGS)
     os.environ["CUDA_VISIBLE_DEVICES"] = FLAGS.gpu_device
-    tf.app.run()
+    tf.compat.v1.app.run()

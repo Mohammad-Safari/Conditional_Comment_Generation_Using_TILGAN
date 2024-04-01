@@ -5,8 +5,8 @@ from tensorflow.python.ops import array_ops
 
 def gaussian_kld(recog_mu, recog_logvar, prior_mu, prior_logvar):
     kld = -0.5 * tf.reduce_sum(1 + (recog_logvar - prior_logvar)
-                               - tf.div(tf.pow(prior_mu - recog_mu, 2), tf.exp(prior_logvar))
-                               - tf.div(tf.exp(recog_logvar), tf.exp(prior_logvar)), reduction_indices=1)
+                               - tf.compat.v1.div(tf.pow(prior_mu - recog_mu, 2), tf.exp(prior_logvar))
+                               - tf.compat.v1.div(tf.exp(recog_logvar), tf.exp(prior_logvar)), axis=1)
     return kld
 
 def gelu(input_tensor):
@@ -18,15 +18,15 @@ def gelu(input_tensor):
   Returns:
     `input_tensor` with the GELU activation applied.
   """
-  cdf = 0.5 * (1.0 + tf.erf(input_tensor / tf.sqrt(2.0)))
+  cdf = 0.5 * (1.0 + tf.math.erf(input_tensor / tf.sqrt(2.0)))
   return input_tensor * cdf
 
 def norm_log_liklihood(x, mu, logvar):
-    return -0.5*tf.reduce_sum(tf.log(2*np.pi) + logvar + tf.div(tf.pow((x-mu), 2), tf.exp(logvar)), reduction_indices=1)
+    return -0.5*tf.reduce_sum(tf.math.log(2*np.pi) + logvar + tf.compat.v1.div(tf.pow((x-mu), 2), tf.exp(logvar)), axis=1)
 
 
 def sample_gaussian(mu, logvar):
-    epsilon = tf.random_normal(tf.shape(logvar), name="epsilon")
+    epsilon = tf.random.normal(tf.shape(logvar), name="epsilon")
     std = tf.exp(0.5 * logvar)
     z= mu + tf.multiply(std, epsilon)
     return z
@@ -58,11 +58,11 @@ def normalize(inputs,
     Returns:
       A tensor with the same shape and data dtype as `inputs`.
     '''
-    with tf.variable_scope(scope, reuse=reuse):
+    with tf.compat.v1.variable_scope(scope, reuse=reuse):
         inputs_shape = inputs.get_shape()
         params_shape = inputs_shape[-1:]
 
-        mean, variance = tf.nn.moments(inputs, [-1], keep_dims=True)
+        mean, variance = tf.nn.moments(inputs, [-1], keepdims=True)
         beta = tf.Variable(tf.zeros(params_shape))
         gamma = tf.Variable(tf.ones(params_shape))
         normalized = (inputs - mean) / ((variance + epsilon) ** (.5))
@@ -101,16 +101,16 @@ def multihead_attention(queries,
     Returns
       A 3d tensor with shape of (N, T_q, C)
     '''
-    with tf.variable_scope(scope, reuse=reuse):
+    with tf.compat.v1.variable_scope(scope, reuse=reuse):
         # Set the fall back option for num_units
         if num_units is None:
             num_units = queries.get_shape().as_list[-1]
 
         # Linear projections
 
-        Q = tf.layers.dense(queries, num_units, activation=None, use_bias=False, name="q")  # (N, T_q, C)
-        K = tf.layers.dense(keys, num_units, activation=None, use_bias=False, name="k")  # (N, T_k, C)
-        V = tf.layers.dense(keys, num_units, activation=None, use_bias=False, name="v")  # (N, T_k, C)
+        Q = tf.compat.v1.layers.dense(queries, num_units, activation=None, use_bias=False, name="q")  # (N, T_q, C)
+        K = tf.compat.v1.layers.dense(keys, num_units, activation=None, use_bias=False, name="k")  # (N, T_k, C)
+        V = tf.compat.v1.layers.dense(keys, num_units, activation=None, use_bias=False, name="v")  # (N, T_k, C)
 
 
         # Split and concat
@@ -131,14 +131,14 @@ def multihead_attention(queries,
         key_masks = tf.tile(tf.expand_dims(key_masks, 1), [1, tf.shape(queries)[1], 1])  # (h*N, T_q, T_k)
 
         paddings = tf.ones_like(outputs) * (-2 ** 32 + 1)
-        outputs = tf.where(tf.equal(key_masks, 0), paddings, outputs)  # (h*N, T_q, T_k)
+        outputs = tf.compat.v1.where(tf.equal(key_masks, 0), paddings, outputs)  # (h*N, T_q, T_k)
 
         if using_mask:
             if not no_tile:
                 mymask = tf.tile(mymasks, [num_heads, 1, 1])
             else:
                 mymask = mymasks
-            outputs = tf.where(tf.equal(mymask, 0), paddings, outputs)
+            outputs = tf.compat.v1.where(tf.equal(mymask, 0), paddings, outputs)
 
         outputs = tf.nn.softmax(outputs)  # (h*N, T_q, T_k)
 
@@ -152,9 +152,9 @@ def multihead_attention(queries,
         outputs = tf.matmul(outputs, V_)  # ( h*N, T_q, C/h)
 
         # Restore shape
-        outputs = tf.layers.dense(tf.concat(tf.split(outputs, num_heads, axis=0), axis=2), num_units, activation=None,
+        outputs = tf.compat.v1.layers.dense(tf.concat(tf.split(outputs, num_heads, axis=0), axis=2), num_units, activation=None,
                                   use_bias=False)  # (N, T_q, C)
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
+        outputs = tf.compat.v1.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
         return outputs
 
 
@@ -181,7 +181,7 @@ def positional_encoding(inputs,
 
     # N, T, _ = inputs.get_shape().as_list()
     N, T = batch_size, length
-    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope(scope, reuse=tf.compat.v1.AUTO_REUSE):
         position_ind = tf.tile(tf.expand_dims(tf.range(T), 0), [N, 1])
 
         # First part of the PE function: sin and cos argument
@@ -234,7 +234,7 @@ def w_encoder_attention(queries,
     Returns
       A 3d tensor with shape of (N, T_q, C)
     '''
-    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope(scope, reuse=tf.compat.v1.AUTO_REUSE):
         # Set the fall back option for num_units
         # print(queries)
         # print(queries.get_shape().as_list)
@@ -242,9 +242,9 @@ def w_encoder_attention(queries,
             num_units = queries.get_shape().as_list[-1]
         # Linear projections
 
-        Q = tf.layers.dense(queries, num_units, activation=None, use_bias=False)  # (N, T_q, C)
-        K = tf.layers.dense(keys, num_units, activation=None, use_bias=False)  # (N, T_k, C)
-        V = tf.layers.dense(keys, num_units, activation=None, use_bias=False)  # (N, T_k, C)
+        Q = tf.compat.v1.layers.dense(queries, num_units, activation=None, use_bias=False)  # (N, T_q, C)
+        K = tf.compat.v1.layers.dense(keys, num_units, activation=None, use_bias=False)  # (N, T_k, C)
+        V = tf.compat.v1.layers.dense(keys, num_units, activation=None, use_bias=False)  # (N, T_k, C)
 
         x = K * Q
         x = tf.reshape(x, [tf.shape(x)[0],tf.shape(x)[1],num_heads, int(num_units/num_heads)])
@@ -260,14 +260,14 @@ def w_encoder_attention(queries,
             key_masks = tf.reshape(tf.tile(key_masks,[1, num_heads]),[tf.shape(key_masks)[0],num_heads,tf.shape(key_masks)[1]])
 
         paddings = tf.ones_like(outputs) * (-2 ** 32 + 1)
-        outputs = tf.where(tf.equal(key_masks, 0), paddings, outputs)
+        outputs = tf.compat.v1.where(tf.equal(key_masks, 0), paddings, outputs)
         outputs = tf.nn.softmax(outputs, 2)
         V_ = tf.reshape(V, [tf.shape(V)[0], tf.shape(V)[1], num_heads, int(num_units / num_heads)])
         V_ = tf.transpose(V_, [0, 2, 1, 3])
-        outputs = tf.layers.dense(tf.reshape(tf.reduce_sum(V_ * tf.expand_dims(outputs, -1), 2), [-1, num_units]),
+        outputs = tf.compat.v1.layers.dense(tf.reshape(tf.reduce_sum(V_ * tf.expand_dims(outputs, -1), 2), [-1, num_units]),
                                   num_units, activation=None, use_bias=False)
         weight = outputs
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
+        outputs = tf.compat.v1.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
     return outputs, weight
 
 
@@ -297,45 +297,45 @@ def feedforward(inputs,
     Returns:
       A 3d tensor with the same shape and dtype as inputs
     '''
-    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+    with tf.compat.v1.variable_scope(scope, reuse=tf.compat.v1.AUTO_REUSE):
         # Inner layer
         params = {"inputs": inputs, "filters": num_units[0], "kernel_size": 1,
                   "activation": tf.nn.relu, "use_bias": True}
-        outputs = tf.layers.conv1d(**params)
+        outputs = tf.compat.v1.layers.conv1d(**params)
 
         # Readout layer
         params = {"inputs": outputs, "filters": num_units[1], "kernel_size": 1,
                   "activation": None, "use_bias": True}
-        outputs = tf.layers.conv1d(**params)
+        outputs = tf.compat.v1.layers.conv1d(**params)
 
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
+        outputs = tf.compat.v1.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
     return outputs
 
-def generator(Z, hsize=[128, 128],reuse=tf.AUTO_REUSE):
-    with tf.variable_scope("GAN/Generator",reuse=reuse):
-        h1 = tf.layers.dense(Z,hsize[0],activation=tf.nn.leaky_relu,name = 'generator_h1')
-        h2 = tf.layers.dense(h1,hsize[1],activation=tf.nn.leaky_relu,name ='generator_h2')
-        out = tf.layers.dense(h2,64,name = 'generator_h3')
+def generator(Z, hsize=[128, 128],reuse=tf.compat.v1.AUTO_REUSE):
+    with tf.compat.v1.variable_scope("GAN/Generator",reuse=reuse):
+        h1 = tf.compat.v1.layers.dense(Z,hsize[0],activation=tf.nn.leaky_relu,name = 'generator_h1')
+        h2 = tf.compat.v1.layers.dense(h1,hsize[1],activation=tf.nn.leaky_relu,name ='generator_h2')
+        out = tf.compat.v1.layers.dense(h2,64,name = 'generator_h3')
 
     return out
 
-def discriminator(X, hsize=[64,64,32,1],reuse=tf.AUTO_REUSE):
-    with tf.variable_scope("GAN/Discriminator",reuse=reuse):
-        h1 = tf.layers.dense(X,hsize[0],activation=tf.nn.leaky_relu,name = 'discriminator_h1')
-        h2 = tf.layers.dense(h1,hsize[1],activation=tf.nn.leaky_relu,name = 'discriminator_h2')
-        h3 = tf.layers.dense(h2,hsize[2],name = 'discriminator_h3')
-        out = tf.layers.dense(h3,hsize[3],name = 'discriminator_h4')
+def discriminator(X, hsize=[64,64,32,1],reuse=tf.compat.v1.AUTO_REUSE):
+    with tf.compat.v1.variable_scope("GAN/Discriminator",reuse=reuse):
+        h1 = tf.compat.v1.layers.dense(X,hsize[0],activation=tf.nn.leaky_relu,name = 'discriminator_h1')
+        h2 = tf.compat.v1.layers.dense(h1,hsize[1],activation=tf.nn.leaky_relu,name = 'discriminator_h2')
+        h3 = tf.compat.v1.layers.dense(h2,hsize[2],name = 'discriminator_h3')
+        out = tf.compat.v1.layers.dense(h3,hsize[3],name = 'discriminator_h4')
 
     return out
 
-def discriminator_bn(x, reuse=tf.AUTO_REUSE):
-    with tf.variable_scope('GAN/Discriminator_bn', reuse=reuse):
-        x = tf.layers.dense(x, 128,name = 'discriminator_bn_h1')
+def discriminator_bn(x, reuse=tf.compat.v1.AUTO_REUSE):
+    with tf.compat.v1.variable_scope('GAN/Discriminator_bn', reuse=reuse):
+        x = tf.compat.v1.layers.dense(x, 128,name = 'discriminator_bn_h1')
         x = tf.nn.leaky_relu(x)
-        x = tf.layers.dense(x, 64,name = 'discriminator_bn_h2')
-        x = tf.nn.leaky_relu(tf.layers.batch_normalization(x, training=True, name='discriminator_bn1'))
-        x = tf.layers.dense(x, 32,name = 'discriminator_bn_h3')
-        x = tf.nn.leaky_relu(tf.layers.batch_normalization(x, training=True, name='discriminator_bn2'))
-        x = tf.layers.dense(x, 1,name = 'discriminator_bn_h4')
+        x = tf.compat.v1.layers.dense(x, 64,name = 'discriminator_bn_h2')
+        x = tf.nn.leaky_relu(tf.compat.v1.layers.batch_normalization(x, training=True, name='discriminator_bn1'))
+        x = tf.compat.v1.layers.dense(x, 32,name = 'discriminator_bn_h3')
+        x = tf.nn.leaky_relu(tf.compat.v1.layers.batch_normalization(x, training=True, name='discriminator_bn2'))
+        x = tf.compat.v1.layers.dense(x, 1,name = 'discriminator_bn_h4')
 
     return x

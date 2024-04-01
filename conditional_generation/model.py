@@ -25,43 +25,43 @@ class TILGAN():
         self.flag = True
         self.mode = mode
         self.batch_size = hparams.batch_size
-        if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+        if self.mode == tf.estimator.ModeKeys.TRAIN:
             self.is_training = True
         else:
             self.is_training = False
 
-        if self.mode != tf.contrib.learn.ModeKeys.INFER:
-            self.input_ids = tf.placeholder(tf.int32, [None, None])
-            self.input_scopes = tf.placeholder(tf.int32, [None, None])
-            self.input_positions = tf.placeholder(tf.int32, [None, None])
-            self.input_masks = tf.placeholder(tf.int32, [None, None, None])
-            self.input_lens = tf.placeholder(tf.int32, [None])
-            self.targets = tf.placeholder(tf.int32, [None, None])
-            self.weights = tf.placeholder(tf.float32, [None, None])
-            self.input_windows = tf.placeholder(tf.float32, [None, 4, None])
-            self.which = tf.placeholder(tf.int32, [None])
+        if self.mode != tf.estimator.ModeKeys.PREDICT:
+            self.input_ids = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.input_scopes = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.input_positions = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.input_masks = tf.compat.v1.placeholder(tf.int32, [None, None, None])
+            self.input_lens = tf.compat.v1.placeholder(tf.int32, [None])
+            self.targets = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.weights = tf.compat.v1.placeholder(tf.float32, [None, None])
+            self.input_windows = tf.compat.v1.placeholder(tf.float32, [None, 4, None])
+            self.which = tf.compat.v1.placeholder(tf.int32, [None])
 
         else:
-            self.input_ids = tf.placeholder(tf.int32, [None, None])
-            self.input_scopes = tf.placeholder(tf.int32, [None, None])
-            self.input_positions = tf.placeholder(tf.int32, [None, None])
-            self.input_masks = tf.placeholder(tf.int32, [None, None, None])
-            self.input_lens = tf.placeholder(tf.int32, [None])
-            self.input_windows = tf.placeholder(tf.float32, [None, 4, None])
-            self.which = tf.placeholder(tf.int32, [None])
+            self.input_ids = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.input_scopes = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.input_positions = tf.compat.v1.placeholder(tf.int32, [None, None])
+            self.input_masks = tf.compat.v1.placeholder(tf.int32, [None, None, None])
+            self.input_lens = tf.compat.v1.placeholder(tf.int32, [None])
+            self.input_windows = tf.compat.v1.placeholder(tf.float32, [None, 4, None])
+            self.which = tf.compat.v1.placeholder(tf.int32, [None])
 
-        with tf.variable_scope("embedding") as scope:
+        with tf.compat.v1.variable_scope("embedding") as scope:
             #Random Initialize
             #self.word_embeddings = tf.Variable(self.init_matrix([self.vocab_size, self.emb_dim]))
             self.word_embeddings = tf.Variable(hparams.embeddings, trainable=True)
             self.scope_embeddings = tf.Variable(self.init_matrix([9, int(self.emb_dim / 2)]))
 
-        with tf.variable_scope("project"):
+        with tf.compat.v1.variable_scope("project"):
             self.output_layer = layers_core.Dense(self.vocab_size, use_bias=True)
             self.mid_output_layer = layers_core.Dense(self.vocab_size, use_bias=True)
             self.input_layer = layers_core.Dense(self.num_units, use_bias=False)
 
-        with tf.variable_scope("encoder") as scope:
+        with tf.compat.v1.variable_scope("encoder") as scope:
             self.word_emb = tf.nn.embedding_lookup(self.word_embeddings, self.input_ids)
             self.scope_emb = tf.nn.embedding_lookup(self.scope_embeddings, self.input_scopes)
             self.pos_emb = positional_encoding(self.input_positions, self.batch_size, self.max_single_length,
@@ -71,13 +71,13 @@ class TILGAN():
             self.embs = tf.concat([self.word_emb, self.scope_emb, self.pos_emb], axis=2)
             inputs = self.input_layer(self.embs)  # [?,105,256]
 
-            self.query = tf.get_variable("w_Q", [1, self.num_units], dtype=tf.float32) # [1,256]
+            self.query = tf.compat.v1.get_variable("w_Q", [1, self.num_units], dtype=tf.float32) # [1,256]
             windows = tf.transpose(self.input_windows, [1, 0, 2])
             layers_outputs = []
 
             post_inputs = inputs
             for i in range(self.num_layers):
-                with tf.variable_scope("num_layers_{}".format(i)):
+                with tf.compat.v1.variable_scope("num_layers_{}".format(i)):
                     outputs = multihead_attention(queries=inputs,
                                                   keys=inputs,
                                                   query_length=self.input_lens,
@@ -109,7 +109,7 @@ class TILGAN():
                                                        using_mask=False,
                                                        mymasks=None,
                                                        scope="self_attention",
-                                                       reuse=tf.AUTO_REUSE
+                                                       reuse=tf.compat.v1.AUTO_REUSE
                                                        )
 
                     post_outputs = post_outputs + post_inputs # [?,?,256]
@@ -117,7 +117,7 @@ class TILGAN():
 
                     post_outputs = feedforward(post_inputs, [self.num_units * 2, self.num_units],
                                                is_training=self.is_training,
-                                               dropout_rate=self.dropout_rate, scope="f1", reuse=tf.AUTO_REUSE)
+                                               dropout_rate=self.dropout_rate, scope="f1", reuse=tf.compat.v1.AUTO_REUSE)
                     post_outputs = post_outputs + post_inputs
                     post_inputs = normalize(post_outputs)
 
@@ -144,42 +144,42 @@ class TILGAN():
                                                        using_mask=True,
                                                        mymasks=big_window,
                                                        scope="concentrate_attention",
-                                                       reuse=tf.AUTO_REUSE
+                                                       reuse=tf.compat.v1.AUTO_REUSE
                                                        )
             #Random Noise
-            z = tf.random_normal(tf.shape(prior_encode))
+            z = tf.random.normal(tf.shape(prior_encode))
             #The input of Generator
             gen_input = tf.concat([prior_encode, z], axis=1)
             #The output of Generator
             fake_sample = generator(gen_input) 
 
             #The output of NLP
-            post_encode = tf.layers.dense(tf.layers.dense(post_encode, 256, activation=tf.nn.tanh,name = 'ae_1'),
+            post_encode = tf.compat.v1.layers.dense(tf.compat.v1.layers.dense(post_encode, 256, activation=tf.nn.tanh,name = 'ae_1'),
                                           64,use_bias = False, name = 'ae_2')
             # The real and fake input of Discriminator
             real_result = discriminator(post_encode)
             fake_result = discriminator(fake_sample)
             
-            if self.mode != tf.contrib.learn.ModeKeys.INFER:
+            if self.mode != tf.estimator.ModeKeys.PREDICT:
                 latent_sample = tf.tile(tf.expand_dims(post_encode, 1), [1, self.max_story_length, 1])
             else:
                 latent_sample = tf.tile(tf.expand_dims(fake_sample, 1), [1, self.max_story_length, 1])
             #Combination 
             inputs = tf.concat([inputs, latent_sample], axis=2)
-            inputs = tf.layers.dense(inputs, self.num_units, activation=tf.tanh, use_bias=False, name="last") #[?,105,256]
+            inputs = tf.compat.v1.layers.dense(inputs, self.num_units, activation=tf.tanh, use_bias=False, name="last") #[?,105,256]
 
             self.logits = self.output_layer(inputs)
             self.s = self.logits
             self.sample_id = tf.argmax(self.logits, axis=2)
 
-        if self.mode != tf.contrib.learn.ModeKeys.INFER:
-            with tf.variable_scope("loss") as scope:
+        if self.mode != tf.estimator.ModeKeys.PREDICT:
+            with tf.compat.v1.variable_scope("loss") as scope:
                 self.global_step = tf.Variable(0, trainable=False)
                 crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.targets, logits=self.logits)
 
                 self.total_loss = tf.reduce_sum(crossent * self.weights)
 
-                kl_weights = tf.minimum(tf.to_float(self.global_step) / 20000, 1.0)
+                kl_weights = tf.minimum(tf.cast(self.global_step, dtype=tf.float32) / 20000, 1.0)
                 #kld = gaussian_kld(post_mu, post_logvar, prior_mu, prior_logvar)
                 #self.loss = tf.reduce_mean(crossent * self.weights) + tf.reduce_mean(kld) * kl_weights
                 self.loss = tf.reduce_mean(crossent * self.weights)
@@ -187,16 +187,16 @@ class TILGAN():
                                     tf.nn.softplus(-real_result)))*0.02
                 self.gen_loss = (tf.reduce_mean(-(tf.clip_by_value(tf.exp(fake_result), 0.5, 2) * fake_result)))*0.02
                 self.gan_ae_loss = tf.reduce_mean(real_result)*0.02
-        if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
-            with tf.variable_scope("train_op") as scope:
-                optimizer = tf.train.AdamOptimizer(0.0001, beta1=0.9, beta2=0.99, epsilon=1e-9)
+        if self.mode == tf.estimator.ModeKeys.TRAIN:
+            with tf.compat.v1.variable_scope("train_op") as scope:
+                optimizer = tf.compat.v1.train.AdamOptimizer(0.0001, beta1=0.9, beta2=0.99, epsilon=1e-9)
                 gradients, v = zip(*optimizer.compute_gradients(self.loss))
                 gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
                 self.train_op = optimizer.apply_gradients(zip(gradients, v), global_step=self.global_step)
 
             #self.gen_step = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(gen_loss)  # G Train step
             #self.disc_step = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(disc_loss)  # D Train step
-            t_vars = tf.trainable_variables()
+            t_vars = tf.compat.v1.trainable_variables()
             d_vars = [var for var in t_vars if 'discriminator_' in var.name]
             g_vars = [var for var in t_vars if 'generator_' in var.name]
             ae_vars = [var for var in t_vars if 'GAN' not in var.name]
@@ -213,7 +213,7 @@ class TILGAN():
             self.disc_step = optimizer.apply_gradients(zip(gradients_disc, v_disc))
             self.gan_ae_step = optimizer.apply_gradients(zip(gradients_gan_ae, v_ae))
 
-        self.saver = tf.train.Saver(tf.global_variables())
+        self.saver = tf.compat.v1.train.Saver(tf.compat.v1.global_variables())
 
     def get_batch(self, data, no_random=False, id=0, which=0,position=None):
         hparams = self.hparams
@@ -406,4 +406,4 @@ class TILGAN():
         return given, ans, predict
 
     def init_matrix(self, shape):
-        return tf.random_normal(shape, stddev=0.1)
+        return tf.random.normal(shape, stddev=0.1)
