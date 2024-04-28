@@ -1,0 +1,21 @@
+{'data_path': 'data/MS_COCO', 'kenlm_path': './kenlm', 'save': './results/coco_result2024-04-28-19-32-39', 'maxlen': 15, 'vocab_size': 0, 'lowercase': True, 'emsize': 512, 'nhidden': 512, 'nlayers': 2, 'noise_r': 0.05, 'nheads': 4, 'nff': 1024, 'aehidden': 56, 'noise_anneal': 0.9995, 'hidden_init': False, 'arch_g': '300-300', 'arch_d': '300-300', 'arch_d_local': '300-300', 'z_size': 100, 'dropout': 0.3, 'noise_seq_length': 15, 'gan_type': 'kl', 'epochs': 100, 'min_epochs': 12, 'no_earlystopping': False, 'patience': 2, 'batch_size': 256, 'eval_batch_size': 32, 'niters_ae': 1, 'niters_gan_d': 1, 'niters_gan_dec': 1, 'niters_gan_g': 1, 'niters_gan_ae': 1, 'niters_gan_schedule': '', 'lr_ae': 0.12, 'lr_gan_e': 0.0001, 'lr_gan_g': 0.0004, 'lr_gan_d': 0.0001, 'beta1': 0.5, 'clip': 1, 'gan_clamp': 0.01, 'gan_gp_lambda': 1, 'gan_lambda': 0.1, 'add_noise': True, 'gan_d_local': True, 'gan_d_local_windowsize': 3, 'gan_g_activation': False, 'enhance_dec': True, 'sample': False, 'N': 5, 'log_interval': 200, 'seed': 1111, 'ntokens': 13548}
+Training
+| epoch   1 |     0/  453 batches | lr 0.000000 | ms/batch 16.23 | loss  0.05 | ppl     1.05 | acc     0.00 | train_ae_norm     1.00
+[1/100][199/453] Loss_D: 1.37996006 (Loss_D_real: 0.68519431 Loss_D_fake: 0.69476581) Loss_G: -0.00013650 Loss_Enh_Dec: -0.00079309
+| epoch   1 |   200/  453 batches | lr 0.000000 | ms/batch 1108.29 | loss  5.79 | ppl   326.39 | acc     0.30 | train_ae_norm     1.00
+[1/100][399/453] Loss_D: 1.37943339 (Loss_D_real: 0.68790400 Loss_D_fake: 0.69152945) Loss_G: 0.00054105 Loss_Enh_Dec: -0.00161577
+| epoch   1 |   400/  453 batches | lr 0.000000 | ms/batch 1091.61 | loss  4.76 | ppl   117.08 | acc     0.31 | train_ae_norm     1.00
+| end of epoch   1 | time: 506.61s | test loss  4.49 | test ppl 89.45 | acc 0.319
+| epoch   2 |     0/  453 batches | lr 0.000000 | ms/batch  1.54 | loss  0.02 | ppl     1.02 | acc     0.30 | train_ae_norm     1.00
+[2/100][199/453] Loss_D: 1.38701367 (Loss_D_real: 0.69920486 Loss_D_fake: 0.68780887) Loss_G: 0.00060448 Loss_Enh_Dec: -0.00127191
+| epoch   2 |   200/  453 batches | lr 0.000000 | ms/batch 1117.20 | loss  4.40 | ppl    81.10 | acc     0.34 | train_ae_norm     1.00
+[2/100][399/453] Loss_D: 1.38206410 (Loss_D_real: 0.69112289 Loss_D_fake: 0.69094115) Loss_G: 0.00071543 Loss_Enh_Dec: -0.00192636
+| epoch   2 |   400/  453 batches | lr 0.000000 | ms/batch 1165.81 | loss  4.33 | ppl    76.13 | acc     0.34 | train_ae_norm     1.00
+| end of epoch   2 | time: 530.00s | test loss  4.20 | test ppl 66.56 | acc 0.338
+| epoch   3 |     0/  453 batches | lr 0.000000 | ms/batch  1.66 | loss  0.02 | ppl     1.02 | acc     0.31 | train_ae_norm     1.00
+[3/100][199/453] Loss_D: 1.37826371 (Loss_D_real: 0.68845004 Loss_D_fake: 0.68981373) Loss_G: 0.00036753 Loss_Enh_Dec: -0.00077458
+| epoch   3 |   200/  453 batches | lr 0.000000 | ms/batch 1183.95 | loss  4.13 | ppl    62.38 | acc     0.34 | train_ae_norm     1.00
+[3/100][399/453] Loss_D: 1.38028932 (Loss_D_real: 0.69138837 Loss_D_fake: 0.68890089) Loss_G: 0.00006237 Loss_Enh_Dec: -0.00044505
+| epoch   3 |   400/  453 batches | lr 0.000000 | ms/batch 1164.45 | loss  4.02 | ppl    55.86 | acc     0.36 | train_ae_norm     1.00
+| end of epoch   3 | time: 542.80s | test loss  3.99 | test ppl 53.97 | acc 0.360
+| epoch   4 |     0/  453 batches | lr 0.000000 | ms/batch  1.48 | loss  0.02 | ppl     1.02 | acc     0.34 | train_ae_norm     1.00
