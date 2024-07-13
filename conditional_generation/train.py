@@ -46,7 +46,7 @@ def add_arguments(parser):
     parser.add_argument("--num_heads", type=int, default=8, help="Number of heads in attention")
     parser.add_argument("--emb_dim", type=int, default=300, help="Dimension of word embedding")
     parser.add_argument("--latent_dim", type=int, default=64, help="Dimension of latent variable")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size to use during training")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size to use during training")
     parser.add_argument("--max_gradient_norm", type=float, default=3.0, help="Clip gradients to this norm")
     parser.add_argument("--learning_rate_decay_factor", type=float, default=0.5, help="Learning rate decays by this much")
     parser.add_argument("--learning_rate", type=float, default=1, help="Learning rate")
@@ -143,7 +143,7 @@ def read_data(src_path):
             s = []
             for x in src.split(" "):
                 id = int(x)
-                if id != -1:
+                if id != 4:
                     s.append(id)
                 else:
                     if len(s) > max_length1:
