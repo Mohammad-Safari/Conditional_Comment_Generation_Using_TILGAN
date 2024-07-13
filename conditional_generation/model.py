@@ -215,7 +215,7 @@ class TILGAN():
 
         self.saver = tf.compat.v1.train.Saver(tf.compat.v1.global_variables())
 
-    def get_batch(self, data, no_random=False, id=0, which=0,position=None):
+    def get_batch(self, data, no_random=False, id=0, which=0, position=None):
         hparams = self.hparams
         input_scopes = []
         input_ids = []
@@ -226,18 +226,18 @@ class TILGAN():
         input_windows = []
         targets = []
         weights = []
+        
         for i in range(hparams.batch_size):
             if no_random:
-                if position != None:
+                if position is not None:
                     x = data[(id + i) % len(data)]
                     which_stn = position
                 else:
                     x = data[(id + i) % len(data)]
-                    which_stn = (id + i) % 5
-                # which_stn = which
+                    which_stn = (id + i) % 2
             else:
                 x = random.choice(data)
-                which_stn = random.randint(0, 4)
+                which_stn = random.randint(0, 1)
 
             input_which.append(which_stn)
             mask = []
@@ -247,10 +247,12 @@ class TILGAN():
             input_mask = []
             target = []
             weight = []
-            for j in range(0, 5):
+
+            for j in range(0, 2):
                 input_id.append(GO_ID)
                 input_scope.append(j)
                 input_position.append(0)
+                
                 for k in range(0, len(x[j])):
                     input_id.append(x[j][k])
                     input_scope.append(j)
@@ -262,6 +264,7 @@ class TILGAN():
                     else:
                         weight.append(0.0)
                         mask.append(1)
+                
                 target.append(EOS_ID)
                 if j == which_stn:
                     weight.append(1.0)
@@ -269,6 +272,7 @@ class TILGAN():
                 else:
                     weight.append(0.0)
                     mask.append(1)
+                
                 input_id.append(EOS_ID)
                 input_scope.append(j)
                 input_position.append(len(x[j]) + 1)
@@ -279,6 +283,7 @@ class TILGAN():
                 else:
                     weight.append(0.0)
                     mask.append(1)
+                
                 if j == which_stn:
                     for k in range(len(x[j]) + 2, self.max_single_length):
                         input_id.append(PAD_ID)
@@ -287,10 +292,12 @@ class TILGAN():
                         target.append(PAD_ID)
                         weight.append(0.0)
                         mask.append(0)
+
             input_lens.append(len(input_id))
+            
             for k in range(0, self.max_story_length - input_lens[i]):
                 input_id.append(PAD_ID)
-                input_scope.append(4)
+                input_scope.append(1)
                 input_position.append(0)
                 target.append(PAD_ID)
                 weight.append(0.0)
@@ -306,9 +313,9 @@ class TILGAN():
             last = 0
             window = []
 
-            for k in range(0, 5):
+            for k in range(0, 2):
                 start = last
-                if k != 4:
+                if k != 1:
                     last = input_scope.index(k + 1)
                 else:
                     last = self.max_story_length
@@ -318,7 +325,6 @@ class TILGAN():
 
             for k in range(input_lens[i]):
                 if input_scope[k] != which_stn:
-
                     input_mask.append(mask)
                 else:
                     tmp_mask[k] = 1
@@ -331,7 +337,7 @@ class TILGAN():
             input_masks.append(input_mask)
 
         return input_ids, input_scopes, input_positions, input_masks, input_lens, input_which, targets, weights, input_windows
-
+    
     def train_step(self, sess, data):
         input_ids, input_scopes, input_positions, input_masks, input_lens, input_which, targets, weights, input_windows = self.get_batch(
             data)
